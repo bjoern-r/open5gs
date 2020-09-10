@@ -43,6 +43,9 @@ int upf_initialize()
     rv = upf_context_parse_config();
     if (rv != OGS_OK) return rv;
 
+    //TODO: get this from config
+    ogs_pfcp_dev_init_tap("ogstap");
+
     rv = ogs_log_config_domain(
             ogs_app()->logger.domain, ogs_app()->logger.level);
     if (rv != OGS_OK) return rv;

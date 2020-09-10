@@ -59,6 +59,7 @@ typedef struct ogs_pfcp_context_s {
 
     ogs_list_t      dev_list;       /* Tun Device List */
     ogs_list_t      subnet_list;    /* UE Subnet List */
+  struct ogs_pfcp_dev_s  *ethdev;        /* tap device for ethernet pdu */
 
     ogs_hash_t      *pdr_hash;      /* hash table (UPF-N3-TEID) */
 } ogs_pfcp_context_t;
@@ -370,6 +371,7 @@ ogs_pfcp_ue_ip_t *ogs_pfcp_ue_ip_alloc(
         int family, const char *apn, uint8_t *addr);
 void ogs_pfcp_ue_ip_free(ogs_pfcp_ue_ip_t *ip);
 
+ogs_pfcp_dev_t *ogs_pfcp_dev_init_tap(const char *ifname);
 ogs_pfcp_dev_t *ogs_pfcp_dev_add(const char *ifname);
 void ogs_pfcp_dev_remove(ogs_pfcp_dev_t *dev);
 void ogs_pfcp_dev_remove_all(void);

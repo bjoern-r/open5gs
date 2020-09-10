@@ -1435,6 +1435,23 @@ void ogs_pfcp_ue_ip_free(ogs_pfcp_ue_ip_t *ue_ip)
     }
 }
 
+ogs_pfcp_dev_t *ogs_pfcp_dev_init_tap(const char *ifname)
+{
+    ogs_pfcp_dev_t *dev = NULL;
+
+    ogs_assert(ifname);
+    ogs_assert(!self.ethdev);
+
+    ogs_pool_alloc(&ogs_pfcp_dev_pool, &dev);
+    ogs_assert(dev);
+    memset(dev, 0, sizeof *dev);
+
+    strcpy(dev->ifname, ifname);
+    (&self)->ethdev = dev;
+
+    return dev;
+}
+
 ogs_pfcp_dev_t *ogs_pfcp_dev_add(const char *ifname)
 {
     ogs_pfcp_dev_t *dev = NULL;
@@ -1470,6 +1487,9 @@ void ogs_pfcp_dev_remove_all(void)
 
     ogs_list_for_each_safe(&self.dev_list, next_dev, dev)
         ogs_pfcp_dev_remove(dev);
+
+    if ((&self)->ethdev)
+        ogs_pool_free(&ogs_pfcp_dev_pool, (&self)->ethdev);
 }
 
 ogs_pfcp_dev_t *ogs_pfcp_dev_find_by_ifname(const char *ifname)

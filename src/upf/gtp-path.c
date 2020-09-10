@@ -46,6 +46,49 @@ static int upf_gtp_handle_slaac(upf_sess_t *sess, ogs_pkbuf_t *recvbuf);
 static int upf_gtp_send_router_advertisement(
         upf_sess_t *sess, uint8_t *ip6_dst);
 
+static void _gtpv1_tap_recv_cb(short when, ogs_socket_t fd, void *data)
+{
+    ogs_pkbuf_t *recvbuf = NULL;
+    int n;
+
+    //ogs_debug("TAP callback received for fd: %d",fd);
+    recvbuf = ogs_pkbuf_alloc(NULL, OGS_MAX_SDU_LEN);
+    ogs_assert(recvbuf);
+    ogs_pkbuf_reserve(recvbuf, OGS_GTPV1U_5GC_HEADER_LEN);
+    ogs_pkbuf_put(recvbuf, OGS_MAX_SDU_LEN-OGS_GTPV1U_5GC_HEADER_LEN);
+
+    n = ogs_read(fd, recvbuf->data, recvbuf->len);
+    if (n <= 0) {
+        ogs_log_message(OGS_LOG_WARN, ogs_socket_errno, "ogs_read() failed");
+        ogs_pkbuf_free(recvbuf);
+        return;
+    }
+
+    ogs_pkbuf_trim(recvbuf, n);
+    //ogs_debug("Paket: length:%d",n);
+    //ogs_log_hexdump(OGS_LOG_DEBUG, recvbuf->data, recvbuf->len);
+
+    {
+        upf_sess_t *sess = NULL;
+        ogs_pfcp_user_plane_report_t report;
+
+        ogs_list_for_each(&upf_self()->sess_list, sess) {
+            if (sess->pdn.pdn_type == OGS_PDU_SESSION_TYPE_ETHERNET){
+                ogs_pfcp_pdr_t *pdr = NULL;
+
+                pdr = ogs_pfcp_sess_default_pdr(&sess->pfcp);
+                ogs_assert(pdr);
+
+                ogs_pfcp_up_handle_pdr(pdr, recvbuf, &report);
+            }else{
+                ogs_warn("session has no Ethernet PDN");
+            }
+        }
+    }
+
+    ogs_pkbuf_free(recvbuf);
+}
+
 static void _gtpv1_tun_recv_cb(short when, ogs_socket_t fd, void *data)
 {
     ogs_pkbuf_t *recvbuf = NULL;
@@ -211,7 +254,7 @@ static void _gtpv1_u_recv_cb(short when, ogs_socket_t fd, void *data)
         pdr = ogs_pfcp_pdr_find_by_teid_and_qfi(teid, qfi);
     }
     if (!pdr) {
-#if 0 /* It's redundant log message */
+#if 1 /* It's redundant log message */
         ogs_warn("[DROP] Cannot find PDR : UPF-N3-TEID[0x%x] QFI[%d]",
                 teid, qfi);
 #endif
@@ -221,33 +264,53 @@ static void _gtpv1_u_recv_cb(short when, ogs_socket_t fd, void *data)
     sess = UPF_SESS(pdr->sess);
     ogs_assert(sess);
 
-    if (ip_h->ip_v == 4 && sess->ipv4)
-        subnet = sess->ipv4->subnet;
-    else if (ip_h->ip_v == 6 && sess->ipv6)
-        subnet = sess->ipv6->subnet;
+    if (sess->pdn.pdn_type == OGS_PDU_SESSION_TYPE_IPV4V6
+        || sess->pdn.pdn_type == OGS_PDU_SESSION_TYPE_IPV4
+        || sess->pdn.pdn_type == OGS_PDU_SESSION_TYPE_IPV6) {
 
-    if (!subnet) {
+        if (ip_h->ip_v == 4 && sess->ipv4)
+            subnet = sess->ipv4->subnet;
+        else if (ip_h->ip_v == 6 && sess->ipv6)
+            subnet = sess->ipv6->subnet;
+
+        if (!subnet) {
 #if 0 /* It's redundant log message */
-        ogs_error("[DROP] Cannot find subnet V:%d, IPv4:%p, IPv6:%p",
+            ogs_error("[DROP] Cannot find subnet V:%d, IPv4:%p, IPv6:%p",
                 ip_h->ip_v, sess->ipv4, sess->ipv6);
         ogs_log_hexdump(OGS_LOG_ERROR, pkbuf->data, pkbuf->len);
 #endif
-        goto cleanup;
-    }
-
-    /* Check IPv6 */
-    if (ogs_app()->parameter.no_slaac == 0 && ip_h->ip_v == 6) {
-        rv = upf_gtp_handle_slaac(sess, pkbuf);
-        if (rv == UPF_GTP_HANDLED) {
             goto cleanup;
         }
-        ogs_assert(rv == OGS_OK);
-    }
 
-    dev = subnet->dev;
-    ogs_assert(dev);
-    if (ogs_write(dev->fd, pkbuf->data, pkbuf->len) <= 0)
-        ogs_error("ogs_write() failed");
+        /* Check IPv6 */
+        if (ogs_app()->parameter.no_slaac == 0 && ip_h->ip_v == 6) {
+            rv = upf_gtp_handle_slaac(sess, pkbuf);
+            if (rv == UPF_GTP_HANDLED) {
+                goto cleanup;
+            }
+            ogs_assert(rv == OGS_OK);
+        }
+
+        dev = subnet->dev;
+        ogs_assert(dev);
+        if (ogs_write(dev->fd, pkbuf->data, pkbuf->len) <= 0)
+            ogs_error("ogs_write() failed");
+    } else if (sess->pdn.pdn_type == OGS_PDU_SESSION_TYPE_ETHERNET){
+        ogs_debug("Ethernet PDU Session... DN:%s APN:%s",sess->pdn.dnn, sess->pdn.apn);
+        dev = sess->ethdev;
+        if (!dev){
+            ogs_error("[DROP] Cannot find TAP device for DN: %s APN:%s",
+                sess->pdn.dnn, sess->pdn.apn);
+            ogs_log_hexdump(OGS_LOG_ERROR, pkbuf->data, pkbuf->len);
+
+            goto cleanup;
+        }
+        ogs_debug("ogs_write: dev.name:%s dev->fd:%d, pkbuf->len:%d name: %s", dev->ifname, dev->fd, pkbuf->len, dev->ifname);
+        if (ogs_write(dev->fd, pkbuf->data, pkbuf->len) <= 0)
+            ogs_error("ogs_write() failed");
+    }else{
+        ogs_error("unsupported pdn_type! %d",sess->pdn.pdn_type);
+    }
 
 cleanup:
     ogs_pkbuf_free(pkbuf);
@@ -286,6 +349,20 @@ int upf_gtp_open(void)
      * $ sudo ifconfig ogstun 45.45.0.1/16 up
      *
      */
+
+    /* open TAP device*/
+    if (ogs_pfcp_self()->ethdev){
+        dev = ogs_pfcp_self()->ethdev;
+        dev->fd = ogs_tun_open(dev->ifname, OGS_MAX_IFNAME_LEN, 1);
+        if (dev->fd == INVALID_SOCKET) {
+            ogs_error("tun_open(dev:%s) failed", dev->ifname);
+            return OGS_ERROR;
+        }
+
+        dev->poll = ogs_pollset_add(ogs_app()->pollset,
+                                    OGS_POLLIN, dev->fd, _gtpv1_tap_recv_cb, NULL);
+        ogs_assert(dev->poll);
+    }
 
     /* Open Tun interface */
     ogs_list_for_each(&ogs_pfcp_self()->dev_list, dev) {
@@ -334,6 +411,13 @@ void upf_gtp_close(void)
     ogs_socknode_remove_all(&upf_self()->gtpu_list);
 
     ogs_list_for_each(&ogs_pfcp_self()->dev_list, dev) {
+        if (dev->poll)
+            ogs_pollset_remove(dev->poll);
+        ogs_closesocket(dev->fd);
+    }
+
+    if (ogs_pfcp_self()->ethdev) {
+        dev = ogs_pfcp_self()->ethdev;
         if (dev->poll)
             ogs_pollset_remove(dev->poll);
         ogs_closesocket(dev->fd);

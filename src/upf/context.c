@@ -436,6 +436,9 @@ upf_sess_t *upf_sess_add(ogs_pfcp_f_seid_t *cp_f_seid,
         sess->ipv6 = ogs_pfcp_ue_ip_alloc(AF_INET6, apn, ue_ip->both.addr6);
         ogs_assert(sess->ipv6);
         ogs_hash_set(self.ipv6_hash, sess->ipv6->addr, OGS_IPV6_LEN, sess);
+    } else if (pdn_type == OGS_PFCP_PDN_TYPE_ETHERNET) {
+        sess->ethdev = ogs_pfcp_self()->ethdev; //TODO extend to not use a single tap device for all ethernet sessions
+        ogs_info("Ethernet PDU: using fixed TAP device...(%s)",sess->ethdev ? sess->ethdev->ifname : "?");
     } else {
         ogs_error("Cannot support PDN-Type[%d] != [IPv4:%d, IPv6:%d]",
                 pdn_type, ue_ip->ipv4, ue_ip->ipv6);

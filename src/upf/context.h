@@ -75,6 +75,7 @@ typedef struct upf_sess_s {
     ogs_pdn_t       pdn;
     ogs_pfcp_ue_ip_t *ipv4;
     ogs_pfcp_ue_ip_t *ipv6;
+    ogs_pfcp_dev_t  *ethdev;           /* tap device for ethernet pdu */
 
     char            *gx_sid;            /* Gx Session ID */
     ogs_pfcp_node_t *pfcp_node;
