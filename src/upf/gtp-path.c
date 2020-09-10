@@ -205,6 +205,11 @@ static void _gtpv1_u_recv_cb(short when, ogs_socket_t fd, void *data)
     ogs_assert(ip_h);
 
     pdr = ogs_pfcp_pdr_find_by_teid_and_qfi(teid, qfi);
+    if (!pdr){
+	ogs_debug("Hack: no PDR found with QFI[%d], trying with default QFI[0]",qfi);
+	qfi = 0;
+        pdr = ogs_pfcp_pdr_find_by_teid_and_qfi(teid, qfi);
+    }
     if (!pdr) {
 #if 0 /* It's redundant log message */
         ogs_warn("[DROP] Cannot find PDR : UPF-N3-TEID[0x%x] QFI[%d]",
